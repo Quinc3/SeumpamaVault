@@ -30,6 +30,20 @@ class InventoryTransactionController extends Controller
 
     public function store(Request $request)
     {
+        $data = $request->validate([
+            'transaction_type_id' => 'required|exists:transaction_types,id',
+            'transaction_code' => 'nullable|string|max:255|unique:inventory_transactions,transaction_code',
+            'transaction_date' => 'required|date',
+            'total_budget' => 'nullable|numeric|min:0',
+            'description' => 'nullable|string',
+            'evidence_file' => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:4096',
+
+            'items' => 'required|array|min:1',
+            'items.*.item_id' => 'required|exists:items,id',
+            'items.*.qty' => 'required|integer|min:1',
+            'items.*.price' => 'required|numeric|min:0',
+        ]);
+
         DB::beginTransaction();
 
         try {
@@ -40,18 +54,18 @@ class InventoryTransactionController extends Controller
             }
 
             $trx = InventoryTransaction::create([
-                'transaction_type_id' => $request->transaction_type_id,
-                'transaction_code' => $request->transaction_code,
-                'transaction_date' => $request->transaction_date,
-                'total_budget' => $request->total_budget ?? 0,
+                'transaction_type_id' => $data['transaction_type_id'],
+                'transaction_code' => $data['transaction_code'] ?? null,
+                'transaction_date' => $data['transaction_date'],
+                'total_budget' => $data['total_budget'] ?? 0,
                 'total_realization' => 0,
                 'evidence_file' => $evidencePath,
-                'description' => $request->description,
+                'description' => $data['description'] ?? null,
             ]);
 
             $total = 0;
 
-            foreach ($request->items as $item) {
+            foreach ($data['items'] as $item) {
                 $subtotal = $item['qty'] * $item['price'];
 
                 InventoryTransactionDetail::create([
@@ -62,7 +76,7 @@ class InventoryTransactionController extends Controller
                     'subtotal' => $subtotal,
                 ]);
 
-                $this->adjustInventoryStock($request->transaction_type_id, $item['item_id'], $item['qty'], $item['price']);
+                $this->adjustInventoryStock($data['transaction_type_id'], $item['item_id'], $item['qty'], $item['price']);
                 $total += $subtotal;
             }
 
