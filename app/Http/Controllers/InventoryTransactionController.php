@@ -2,13 +2,13 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Inventory;
 use App\Models\InventoryTransaction;
 use App\Models\InventoryTransactionDetail;
 use App\Models\Item;
 use App\Models\TransactionType;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Storage;
 
 class InventoryTransactionController extends Controller
 {
@@ -62,35 +62,7 @@ class InventoryTransactionController extends Controller
                     'subtotal' => $subtotal,
                 ]);
 
-                $inventory = \App\Models\Inventory::where('item_id', $item['item_id'])->first();
-
-                if (!$inventory) {
-                    $inventory = \App\Models\Inventory::create([
-                        'item_id' => $item['item_id'],
-                        'quantity' => 0,
-                        'price' => $item['price'],
-                        'barcode' => 'INV-' . date('Ymd') . '-' . strtoupper(substr(uniqid(), -5)),
-                        'status' => 'baik',
-                    ]);
-                }
-
-                $transactionType = \App\Models\TransactionType::find($request->transaction_type_id);
-
-                if (strtolower($transactionType->name) == 'pembelian') {
-                    $inventory->quantity += $item['qty'];
-                }
-
-                if (strtolower($transactionType->name) == 'penghapusan') {
-                    $inventory->quantity -= $item['qty'];
-
-                    if ($inventory->quantity < 0) {
-                        throw new \Exception('Stok tidak cukup untuk penghapusan.');
-                    }
-                }
-
-                $inventory->price = $item['price'];
-                $inventory->save();
-
+                $this->adjustInventoryStock($request->transaction_type_id, $item['item_id'], $item['qty'], $item['price']);
                 $total += $subtotal;
             }
 
@@ -111,5 +83,36 @@ class InventoryTransactionController extends Controller
         $transaction->load(['type', 'details.item']);
 
         return view('pages.transactions.show', compact('transaction'));
+    }
+
+    private function adjustInventoryStock(int $transactionTypeId, int $itemId, int $quantity, float $price)
+    {
+        $inventory = Inventory::where('item_id', $itemId)->first();
+
+        if (!$inventory) {
+            $inventory = Inventory::create([
+                'item_id' => $itemId,
+                'quantity' => 0,
+                'price' => $price,
+                'barcode' => 'INV-' . date('Ymd') . '-' . strtoupper(substr(uniqid(), -5)),
+                'status' => 'baik',
+            ]);
+        }
+
+        $transactionType = TransactionType::find($transactionTypeId);
+        $transactionName = strtolower(trim($transactionType->name));
+
+        if ($transactionName === 'pembelian') {
+            $inventory->quantity += $quantity;
+        } elseif ($transactionName === 'penghapusan') {
+            $inventory->quantity -= $quantity;
+
+            if ($inventory->quantity < 0) {
+                throw new \Exception('Stok tidak cukup untuk penghapusan.');
+            }
+        }
+
+        $inventory->price = $price;
+        $inventory->save();
     }
 }

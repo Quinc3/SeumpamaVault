@@ -3,7 +3,9 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Models\Inventory;
 use App\Models\InventoryTransaction;
+use App\Models\TransactionType;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -41,13 +43,19 @@ class InventoryTransactionApiController extends Controller
         $details = $data['details'] ?? [];
         unset($data['details']);
 
-        $transaction = DB::transaction(function () use ($data, $details) {
+        $totalRealization = 0;
+
+        $transaction = DB::transaction(function () use ($data, $details, &$totalRealization) {
             $transaction = InventoryTransaction::create($data);
 
             foreach ($details as $detail) {
                 $detail['subtotal'] = $detail['quantity'] * $detail['price'];
                 $transaction->details()->create($detail);
+                $this->adjustInventoryStock($data['transaction_type_id'], $detail['item_id'], $detail['quantity'], $detail['price']);
+                $totalRealization += $detail['subtotal'];
             }
+
+            $transaction->update(['total_realization' => $totalRealization]);
 
             return $transaction;
         });
@@ -117,5 +125,36 @@ class InventoryTransactionApiController extends Controller
         return response()->json([
             'message' => 'Transaksi inventory berhasil dihapus',
         ]);
+    }
+
+    private function adjustInventoryStock(int $transactionTypeId, int $itemId, int $quantity, float $price)
+    {
+        $inventory = Inventory::where('item_id', $itemId)->first();
+
+        if (!$inventory) {
+            $inventory = Inventory::create([
+                'item_id' => $itemId,
+                'quantity' => 0,
+                'price' => $price,
+                'barcode' => 'INV-' . date('Ymd') . '-' . strtoupper(substr(uniqid(), -5)),
+                'status' => 'baik',
+            ]);
+        }
+
+        $transactionType = TransactionType::find($transactionTypeId);
+        $transactionName = strtolower(trim($transactionType->name));
+
+        if ($transactionName === 'pembelian') {
+            $inventory->quantity += $quantity;
+        } elseif ($transactionName === 'penghapusan') {
+            $inventory->quantity -= $quantity;
+
+            if ($inventory->quantity < 0) {
+                throw new \Exception('Stok tidak cukup untuk penghapusan.');
+            }
+        }
+
+        $inventory->price = $price;
+        $inventory->save();
     }
 }
